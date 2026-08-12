@@ -4,6 +4,20 @@ Premium always-on voice typing for your PC. Press **Alt+Q** anywhere, talk natur
 
 Open source — MIT licensed.
 
+
+
+## ⬇️ Download
+
+**Latest stable release:** [v1.0.0](https://github.com/abdullahaamuda-code/Vokto/releases/latest)
+
+| Platform | File |
+|----------|------|
+| **Windows** | [Vokto-Setup.exe](https://github.com/abdullahaamuda-code/Vokto/releases/latest) |
+
+Download the installer, add your keys, and press **Alt+Q** anywhere to start.
+
+---
+
 ## Why it feels like Wispr Flow
 
 - **Adaptive VAD chunking** — the app detects when you pause (~1.5s) and ships that clause to Groq instantly, so text appears phrase-by-phrase. Same technique Perplexity and Wispr use.
