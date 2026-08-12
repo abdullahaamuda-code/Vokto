@@ -4,7 +4,7 @@ Premium always-on voice typing for your PC. Press **Alt+Q** anywhere, talk natur
 
 Open source — MIT licensed.
 
-## Why it feels like Perplexity / Wispr Flow
+## Why it feels like Wispr Flow
 
 - **Adaptive VAD chunking** — the app detects when you pause (~1.5s) and ships that clause to Groq instantly, so text appears phrase-by-phrase. Same technique Perplexity and Wispr use.
 - **Whisper `prompt` chaining** — each chunk gets the prior text passed back as context, keeping punctuation, tone, and spelling continuous across chunk boundaries.
@@ -73,4 +73,4 @@ packages/shared/src/index.ts   Shared types + IPC contract (single source of tru
 - No telemetry, no accounts, no cloud storage. Only outbound traffic: the Groq API calls you explicitly configure.
 
 ---
- **Built with ❤️ by Abdullah A-Amuda **
+ **Built with ❤️ by Abdullah A-Amuda**
