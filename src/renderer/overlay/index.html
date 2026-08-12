@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vokto</title>
+    <style>
+      html, body, #root {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // The window is click-through by default (main sets ignoreMouseEvents).
+      // The renderer reports whether the cursor is over the actual pill so the
+      // OS only lets clicks land when the pointer is ON the pill — everything
+      // around it falls straight through to the app below.
+      (function () {
+        let inside = false;
+        window.addEventListener('pointermove', function (e) {
+          const el = document.elementFromPoint(e.clientX, e.clientY);
+          const over = !!(el && el.closest && el.closest('#vq-bar'));
+          if (over !== inside) {
+            inside = over;
+            if (window.vqOverlay && window.vqOverlay.cursorRegion) {
+              window.vqOverlay.cursorRegion(over);
+            }
+          }
+        });
+        window.addEventListener('pointerleave', function () {
+          if (inside) {
+            inside = false;
+            if (window.vqOverlay && window.vqOverlay.cursorRegion) {
+              window.vqOverlay.cursorRegion(false);
+            }
+          }
+        });
+      })();
+    </script>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

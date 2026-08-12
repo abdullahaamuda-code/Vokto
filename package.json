@@ -1,0 +1,84 @@
+{
+  "name": "vokto",
+  "productName": "Vokto",
+  "version": "0.1.0",
+  "description": "Vokto — always-on voice typing. Alt+Q, talk, text streams wherever your cursor is.",
+  "author": "abdul",
+  "license": "MIT",
+  "private": true,
+  "main": "out/main/index.js",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "postinstall": "node -e \"const {execSync}=require('child_process');try{console.log('rebuilding esbuild…');execSync('node node_modules/esbuild/install.js',{stdio:'inherit'});}catch(e){console.log(e.message)}\"",
+    "dist": "npm run icon && electron-vite build && electron-builder --win dir",
+    "dist:full": "npm run icon && electron-vite build && electron-builder --win nsis",
+    "icon": "node scripts/icon.cjs",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "electron": "^33.2.1",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "~5.6.2",
+    "vite": "^5.4.11"
+  },
+  "dependencies": {
+    "framer-motion": "^11.11.17",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "build": {
+    "appId": "com.vokto.app",
+    "productName": "Vokto",
+    "files": [
+      "out/**/*",
+      "!**/*.{map,log}"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "build/icon.ico"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signingHashAlgorithms": ["sha256"],
+      "verifyUpdateCodeSignature": false
+    },
+    "forceCodeSigning": false,
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Vokto",
+      "runAfterFinish": true,
+      "menuCategory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    },
+    "directories": {
+      "output": "release"
+    }
+  }
+}
