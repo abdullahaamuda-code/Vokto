@@ -72,8 +72,5 @@ packages/shared/src/index.ts   Shared types + IPC contract (single source of tru
 - Audio never persists beyond the active session temp folder (auto-deleted per-session and on crash-recovery).
 - No telemetry, no accounts, no cloud storage. Only outbound traffic: the Groq API calls you explicitly configure.
 
-## Roadmap (not in this build)
-
-- **PWA companion** for your Samsung: same UI, WebRecorder-only, keys entered once on device.
-- Native Android floating bubble + IME binding (Kotlin).
-- Command mode (voice-triggered shortcuts, "send", "undo", etc.).
+---
+ **Built with ❤️ by Abdullah A-Amuda **
