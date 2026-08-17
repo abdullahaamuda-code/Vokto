@@ -8,11 +8,11 @@ Open source — MIT licensed.
 
 ## ⬇️ Download
 
-**Latest stable release:** [v1.0.0](https://github.com/abdullahaamuda-code/Vokto/releases/latest)
+**Latest stable release:** [v2.0.0](https://github.com/abdullahaamuda-code/Vokto/releases/latest)
 
 | Platform | File |
 |----------|------|
-| **Windows** | [Vokto-Setup.exe](https://github.com/abdullahaamuda-code/Vokto/releases/latest) |
+| **Windows** | [Vokto-Setup-2.0.0.exe](https://github.com/abdullahaamuda-code/Vokto/releases/latest) |
 
 Download the installer, add your keys, and press **Alt+Q** anywhere to start.
 
