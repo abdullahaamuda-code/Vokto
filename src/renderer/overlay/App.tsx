@@ -12,12 +12,14 @@ declare global {
 // Whisper-Flow tiny capsule. A slim pill that sits bottom-center, pure waveform
 // only, no text. Cursor follows your voice peaks. Sleek.
 
-const WIN_W = 340;
-const WIN_H = 88;
-// pad(9) + dot(5) + gap(7) + wave(38) + pad(9) — hug contents, no dead space
+// The capsule card hugs the bottom of the (500x160) always-on-top window.
+// The transcript bubble grows upward from the pill so the pill never jumps.
 const PILL_W = 94;
 const PILL_H = 36;
 const PILL_R = PILL_H / 2; // perfect capsule
+const CARD_BOTTOM = 12; // the whole card hugs the bottom of the window
+const TRANS_W = 464;
+const TRANS_MAX_LINES = 3;
 
 function useOverlayDrag() {
   const [dragging, setDragging] = useState(false);
@@ -95,6 +97,9 @@ export function App() {
   const [speakingNow, setSpeakingNow] = useState(false);
   const [queuedBlink, setQueuedBlink] = useState(false); // brief dot pulse when a chunk ships
   const [latencyMs, setLatencyMs] = useState<number | null>(null); // Groq round-trip for last utterance
+  // Rolling transcript of the current session — newest on top. This is what
+  // makes it feel like streaming: words land in the pill as they're transcribed.
+  const [transcript, setTranscript] = useState<string[]>([]);
   const shipAtRef = useRef(0);
   const latencyTimerRef = useRef(0);
   const recorderRef = useRef<VoquaRecorder | null>(null);
@@ -127,6 +132,7 @@ export function App() {
         if (cmd.state === 'recording') {
           setWarning(null);
           setVisible(true);
+          setTranscript([]); // fresh session, fresh transcript
         }
         if (cmd.state === 'idle') {
           window.setTimeout(() => setVisible(false), 280);
@@ -140,6 +146,13 @@ export function App() {
           setLatencyMs(ms);
           window.clearTimeout(latencyTimerRef.current);
           latencyTimerRef.current = window.setTimeout(() => setLatencyMs(null), 2200);
+        }
+        if (cmd.finalized && cmd.liveText) {
+          setTranscript((prev) => {
+            const line = cmd.liveText;
+            const next = [line, ...prev].slice(0, TRANS_MAX_LINES);
+            return next;
+          });
         }
       } else if (cmd.type === 'reset') {
         setWarning(null);
@@ -203,50 +216,95 @@ export function App() {
         {visible && (
           <motion.div
             id="vq-bar"
-            initial={{ opacity: 0, scale: 0.88, y: 6 }}
+            initial={{ opacity: 0, scale: 0.9, y: 6 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 5 }}
+            exit={{ opacity: 0, scale: 0.92, y: 5 }}
             transition={{ type: 'spring', stiffness: 520, damping: 30 }}
-            className="absolute flex items-center justify-center gap-[7px] px-[9px] select-none"
+            className="absolute flex flex-col items-center gap-[8px] select-none"
             style={{
-              width: PILL_W,
-              height: PILL_H,
-              borderRadius: PILL_R,
-              cursor: drag.cursor,
-              // Pin dead-center of the fixed window regardless of window motion
+              bottom: CARD_BOTTOM,
               left: '50%',
-              top: '50%',
-              transform: 'translate(-50%, -50%)',
-              background: glow
-                ? 'linear-gradient(165deg, rgba(28,22,12,0.94), rgba(13,11,6,0.92))'
-                : 'rgba(12,12,17,0.92)',
-              backdropFilter: 'blur(22px) saturate(170%)',
-              border: glow ? '1px solid rgba(232,176,74,0.28)' : '1px solid rgba(255,255,255,0.08)',
-              boxShadow: glow
-                ? '0 10px 32px -10px rgba(0,0,0,0.9), 0 0 0 1px rgba(232,176,74,0.10), 0 0 20px -4px rgba(232,176,74,0.35)'
-                : '0 10px 28px -10px rgba(0,0,0,0.85)',
-              opacity: listening ? (glow ? 1 : 0.62) : 1,
-              transition:
-                'background 220ms ease, border 220ms ease, box-shadow 220ms ease, opacity 240ms ease',
+              transform: 'translateX(-50%)',
+              cursor: drag.cursor,
               touchAction: 'none',
             }}
             {...drag}
           >
-            {/* status dot — pulses once when a sentence ships, bright while talking */}
-            <motion.span
-              className="block rounded-full shrink-0"
+            {/* live transcript bubble — appears ABOVE the pill, newest on top.
+                The card is bottom-anchored, so the bubble grows upward and the
+                capsule never jumps. Whole card is one draggable surface. */}
+            <AnimatePresence>
+              {transcript.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.18 }}
+                  className="rounded-xl px-3 py-2 text-[11px] leading-snug"
+                  style={{
+                    width: TRANS_W,
+                    background: 'rgba(10,10,15,0.72)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    backdropFilter: 'blur(16px) saturate(160%)',
+                    boxShadow: '0 8px 24px -12px rgba(0,0,0,0.8)',
+                  }}
+                >
+                  {state === 'processing' && (
+                    <div className="text-glow-soft/70 italic animate-pulse">…</div>
+                  )}
+                  {transcript.map((line, i) => (
+                    <div
+                      key={`${i}-${line}`}
+                      className="whitespace-pre-wrap break-words overflow-hidden"
+                      style={{
+                        maxHeight: 18,
+                        color: i === 0 ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.4)',
+                        fontStyle: i === 0 ? 'normal' : 'italic',
+                      }}
+                    >
+                      {line}
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* the capsule */}
+            <div
+              className="flex items-center justify-center gap-[7px] px-[9px]"
               style={{
-                width: 5,
-                height: 5,
-                background: micError ? '#ff5c74' : glow ? '#e8b04a' : '#6b6b7e',
-                boxShadow: glow ? '0 0 6px rgba(232,176,74,0.7)' : 'none',
-                transition: 'background 220ms ease, box-shadow 220ms ease',
+                width: PILL_W,
+                height: PILL_H,
+                borderRadius: PILL_R,
+                background: glow
+                  ? 'linear-gradient(165deg, rgba(28,22,12,0.94), rgba(13,11,6,0.92))'
+                  : 'rgba(12,12,17,0.92)',
+                backdropFilter: 'blur(22px) saturate(170%)',
+                border: glow ? '1px solid rgba(232,176,74,0.28)' : '1px solid rgba(255,255,255,0.08)',
+                boxShadow: glow
+                  ? '0 10px 32px -10px rgba(0,0,0,0.9), 0 0 0 1px rgba(232,176,74,0.10), 0 0 20px -4px rgba(232,176,74,0.35)'
+                  : '0 10px 28px -10px rgba(0,0,0,0.85)',
+                opacity: listening ? (glow ? 1 : 0.62) : 1,
+                transition:
+                  'background 220ms ease, border 220ms ease, box-shadow 220ms ease, opacity 240ms ease',
               }}
-              animate={queuedBlink ? { scale: [1, 1.9, 1], opacity: [1, 0.5, 1] } : glow ? { opacity: [0.85, 1, 0.85] } : {}}
-              transition={queuedBlink ? { duration: 0.5 } : glow ? { duration: 2.1, repeat: Infinity } : {}}
-            />
-            {/* waveform — fixed slim width, no stretch */}
-            <SlimWave level={micLevel} active={glow} error={micError} />
+            >
+              {/* status dot — pulses once when a sentence ships, bright while talking */}
+              <motion.span
+                className="block rounded-full shrink-0"
+                style={{
+                  width: 5,
+                  height: 5,
+                  background: micError ? '#ff5c74' : glow ? '#e8b04a' : '#6b6b7e',
+                  boxShadow: glow ? '0 0 6px rgba(232,176,74,0.7)' : 'none',
+                  transition: 'background 220ms ease, box-shadow 220ms ease',
+                }}
+                animate={queuedBlink ? { scale: [1, 1.9, 1], opacity: [1, 0.5, 1] } : glow ? { opacity: [0.85, 1, 0.85] } : {}}
+                transition={queuedBlink ? { duration: 0.5 } : glow ? { duration: 2.1, repeat: Infinity } : {}}
+              />
+              {/* waveform — fixed slim width, no stretch */}
+              <SlimWave level={micLevel} active={glow} error={micError} />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -258,7 +316,7 @@ export function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             className="absolute left-1/2 -translate-x-1/2 text-[10px] text-warn text-center max-w-[220px] leading-snug"
-            style={{ top: (WIN_H - PILL_H) / 2 - 18 }}
+            style={{ bottom: CARD_BOTTOM + PILL_H + 16 }}
           >
             {warning}
           </motion.p>
@@ -272,7 +330,7 @@ export function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             className="absolute left-1/2 -translate-x-1/2 font-mono text-[9px] tracking-wide text-glow-soft/80"
-            style={{ top: (WIN_H - PILL_H) / 2 + 16 }}
+            style={{ bottom: CARD_BOTTOM + PILL_H + 10 }}
           >
             {latencyMs >= 1000 ? `${(latencyMs / 1000).toFixed(1)}s` : `${latencyMs}ms`}
           </motion.span>

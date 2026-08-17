@@ -22,15 +22,36 @@
       // around it falls straight through to the app below.
       (function () {
         let inside = false;
-        window.addEventListener('pointermove', function (e) {
-          const el = document.elementFromPoint(e.clientX, e.clientY);
-          const over = !!(el && el.closest && el.closest('#vq-bar'));
+        let lastX = 0;
+        let lastY = 0;
+        // A small halo around the card so grabbing right at the edge/tip of the
+        // capsule (or just past it) still registers instead of flickering the
+        // click-through toggle on and off.
+        const INFLATE = 10;
+        function overBar() {
+          const el = document.getElementById('vq-bar');
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          return (
+            lastX >= r.left - INFLATE &&
+            lastX <= r.right + INFLATE &&
+            lastY >= r.top - INFLATE &&
+            lastY <= r.bottom + INFLATE
+          );
+        }
+        function sync() {
+          const over = overBar();
           if (over !== inside) {
             inside = over;
             if (window.vqOverlay && window.vqOverlay.cursorRegion) {
               window.vqOverlay.cursorRegion(over);
             }
           }
+        }
+        window.addEventListener('pointermove', function (e) {
+          lastX = e.clientX;
+          lastY = e.clientY;
+          sync();
         });
         window.addEventListener('pointerleave', function () {
           if (inside) {

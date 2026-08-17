@@ -16,16 +16,35 @@ interface WorkletFrame {
 }
 
 const FLOOR_CALIBRATION_MS = 900;
-const UTTERANCE_PAUSE_MS = 1_700; // ~1.7s of real quiet → ship this sentence + auto-paste
+// Sustained energy required before a blip is promoted to a real utterance.
+// Worklet frames arrive every ~128ms (2048 samples @ 16k), so requiring ~2
+// consecutive frames above threshold kills single-frame transients (clicks,
+// taps, one-off pops) from ever becoming dictation.
+const SPEECH_CONFIRM_MS = 200;
+const UTTERANCE_PAUSE_MS = 950; // ~0.95s of real quiet → ship this sentence + auto-paste
 const SPEECH_RESUME_GRACE_MS = 220; // brief dips below threshold still count as "talking"
 const TAIL_CARRY_MS = 140; // keep a whisper of the pause so we never clip a word edge
-const MIN_UTTERANCE_MS = 500; // don't flush on accidental sub-0.5s blips
+const MIN_UTTERANCE_MS = 280; // drop sub-0.28s blips, but keep short words like "So" / "Okay"
 const LONG_PAUSE_ABORT_MS = 120_000; // 2 min dead silence → auto-close entirely (safety)
+// A shipped chunk whose RMS doesn't beat this much of the noise floor is not
+// speech — drop it before it ever reaches Whisper (kills "random text from
+// random sound").
+const NOISE_DROP_RATIO = 2.5;
+const MIN_CHUNK_RMS = 0.004;
 
 // Per-utterance streaming: we keep the mic hot across the whole session.
-// Every time you pause to breathe/think (~1.5s), the buffered speech is cut
+// Every time you pause to breathe/think (~1.1s), the buffered speech is cut
 // out, transcribed and pasted where your cursor sits — and the recorder keeps
 // listening for your next sentence without missing a beat.
+//
+// Noise safety:
+//  - No silence is ever buffered. The buffer only fills while speech (or a
+//    140ms tail) is live, so a stray sound after long quiet can't ship a
+//    bucket of silence that Whisper turns into hallucinated text.
+//  - A blip must stay above threshold for SPEECH_CONFIRM_MS before it counts
+//    as an utterance (keyboard clicks are far shorter than that).
+//  - Shipped chunks are RMS-checked against the noise floor; near-silent
+//    "utterances" are dropped on the floor.
 
 export class VoquaRecorder {
   private stream?: MediaStream;
@@ -36,13 +55,14 @@ export class VoquaRecorder {
   private recording = false;
   private buf: Float32Array[] = [];
   private bufMs = 0;
-  private lastSpeechAt = 0;
   private floor = 0.0035;
   private calibratingUntil = 0;
   private deviceId = 'default';
   private lastLevel = 0;
-  private speaking = false; // in an utterance (after a real pause)
+  private speaking = false; // inside an utterance (speech confirmed + in progress)
   private hot = false; // voice-active right now (grace-extended) — drives the pill glow
+  private lastEnergyAt = 0; // last frame with energy above threshold
+  private energyStartAt = 0; // first frame of the current sustained-energy run (debounce)
 
   constructor(private events: RecorderEvents) {}
 
@@ -102,23 +122,17 @@ export class VoquaRecorder {
     this.hot = false;
     this.buf = [];
     this.bufMs = 0;
-    this.lastSpeechAt = performance.now();
+    this.lastEnergyAt = performance.now();
+    this.energyStartAt = 0;
   }
 
   stop(): void {
     this.recording = false;
     this.hot = false;
-    if (this.buf.length > 0) {
-      const wav = this.bufferToWav(this.buf);
-      // Only use flush-end — audioChunk is a no-op in the simple pipeline
-      if (wav) {
-        this.events.onFlushEnd(wav.wav, wav.durationSec); // sole trigger
-      } else {
-        this.events.onFlushEnd(new ArrayBuffer(0), 0);
-      }
-    } else {
-      this.events.onFlushEnd(new ArrayBuffer(0), 0);
-    }
+    this.energyStartAt = 0;
+    // Flush whatever is still buffered (the tail of the last sentence) — gated
+    // so a leftover 140ms of silence after a flush can't ship as junk.
+    this.flushFinal();
     this.buf = [];
     this.bufMs = 0;
     this.speaking = false;
@@ -143,16 +157,33 @@ export class VoquaRecorder {
     this.node = undefined;
   }
 
-  private bufferToWav(segments: Float32Array[]): { wav: ArrayBuffer; durationSec: number } | null {
+  private rate(): number {
+    return this.ctx?.sampleRate ?? 16000;
+  }
+
+  private minSamples(): number {
+    return Math.floor((MIN_UTTERANCE_MS / 1000) * this.rate());
+  }
+
+  // Encode segments → WAV only if they clear the energy gate. Returns null if
+  // the chunk is really just noise.
+  private segmentsToWav(segments: Float32Array[]): { wav: ArrayBuffer; durationSec: number } | null {
     const total = segments.reduce((n, s) => n + s.length, 0);
-    if (total < 4000) return null; // below 0.25s, don't bother
+    if (total < this.minSamples()) return null;
+    const rate = this.rate();
     const merged = new Float32Array(total);
     let off = 0;
+    let sumSq = 0;
     for (const s of segments) {
       merged.set(s, off);
+      for (let i = 0; i < s.length; i++) {
+        const v = s[i];
+        sumSq += v * v;
+      }
       off += s.length;
     }
-    const rate = this.ctx?.sampleRate ?? 16000;
+    const rms = Math.sqrt(sumSq / Math.max(1, total));
+    if (rms < Math.max(this.floor * NOISE_DROP_RATIO, MIN_CHUNK_RMS)) return null;
     const wav = encodeWav(merged, rate);
     return { wav: wav.buffer as ArrayBuffer, durationSec: total / rate };
   }
@@ -171,48 +202,92 @@ export class VoquaRecorder {
     const threshold = Math.max(this.floor * 3.0, 0.005);
     const isSpeech = f.e > threshold;
 
+    // Slow floor adaptation while quiet so a changing room noise doesn't drift
+    // the threshold into hallucination territory.
+    if (!isSpeech) {
+      this.floor = Math.min(Math.max(this.floor * 0.999 + f.e * 0.001, 0.0015), 0.03);
+    }
+
     // "hot" = voice active WITH a short grace so the pill doesn't flicker
     // between words. "speaking" = an utterance is in progress (needs a real gap
     // to turn off, which is exactly what cuts the sentence cleanly).
     if (isSpeech) {
-      this.lastSpeechAt = now;
+      this.lastEnergyAt = now;
       this.hot = true;
-      this.speaking = true;
+    } else if (now - this.lastEnergyAt > SPEECH_RESUME_GRACE_MS) {
+      this.hot = false;
+    }
+
+    // Debounce speech start: a blip must stay above threshold for
+    // SPEECH_CONFIRM_MS before it becomes an utterance. One-off clicks and
+    // keyboard taps never qualify.
+    if (isSpeech) {
+      if (this.energyStartAt === 0) this.energyStartAt = now;
+      if (!this.speaking && now - this.energyStartAt >= SPEECH_CONFIRM_MS) {
+        this.speaking = true;
+        this.buf = [];
+        this.bufMs = 0;
+      }
     } else {
-      if (now - this.lastSpeechAt > SPEECH_RESUME_GRACE_MS) this.hot = false;
-      if (now - this.lastSpeechAt > UTTERANCE_PAUSE_MS) this.speaking = false;
+      this.energyStartAt = 0;
     }
 
     if (!this.recording) return;
 
-    this.buf.push(f.pcm);
-    this.bufMs += (f.pcm.length / this.ctx.sampleRate) * 1000;
-
-    const silenceMs = now - this.lastSpeechAt;
-
     // Real pause after talking → cut the utterance just BEFORE the silence
     // (keeping a whisper of tail so no word edge is ever clipped) and ship it
     // to be transcribed + auto-pasted. The session stays live.
-    if (this.speaking === false && this.bufMs >= MIN_UTTERANCE_MS && silenceMs > UTTERANCE_PAUSE_MS) {
-      const rate = this.ctx.sampleRate;
-      const cutSamples = Math.max(0, Math.floor(((silenceMs - TAIL_CARRY_MS) / 1000) * rate));
-      const slice = this.sliceBufferTail(this.buf, cutSamples);
-      console.log(
-        `[audio] sentence done (${Math.round(silenceMs)}ms quiet) — shipping ${(slice.ms / 1000).toFixed(1)}s, dropped ${(cutSamples / rate).toFixed(2)}s of trailing silence`,
-      );
-      const wav = this.bufferToWav(slice.segments);
-      if (wav) {
-        this.events.onFlushEnd(wav.wav, wav.durationSec);
-        this.events.onUtterancePause();
-      }
-      this.buf = slice.remainder;
-      this.bufMs = slice.remainderMs;
-      return;
+    if (this.speaking && !isSpeech && now - this.lastEnergyAt > UTTERANCE_PAUSE_MS) {
+      this.speaking = false;
+      this.shipUtterance(now);
+    }
+
+    // Buffer only while speaking or for a whisper of tail after shipping.
+    // Silence is never accumulated — that's what kept shipping noise buckets.
+    const buffering = this.speaking || now - this.lastEnergyAt < TAIL_CARRY_MS;
+    if (buffering) {
+      this.buf.push(f.pcm);
+      this.bufMs += (f.pcm.length / this.rate()) * 1000;
+    } else if (this.bufMs > 0) {
+      this.buf = [];
+      this.bufMs = 0;
     }
 
     // Safety: dead silence (never spoke, or long after settle) for 2 minutes → close
-    if (!this.speaking && this.bufMs < 500 && silenceMs > LONG_PAUSE_ABORT_MS) {
+    if (!this.speaking && this.bufMs === 0 && now - this.lastEnergyAt > LONG_PAUSE_ABORT_MS) {
       this.events.onSilenceStart();
+    }
+  }
+
+  // Cut the buffered utterance, trim trailing silence, ship the speech chunk.
+  private shipUtterance(now: number): void {
+    if (!this.ctx) return;
+    const rate = this.rate();
+    const silenceMs = Math.min(now - this.lastEnergyAt, UTTERANCE_PAUSE_MS);
+    const cutSamples = Math.max(0, Math.floor(((silenceMs - TAIL_CARRY_MS) / 1000) * rate));
+    const { segments, remainder, remainderMs } = this.sliceBufferTail(this.buf, cutSamples);
+    this.buf = remainder;
+    this.bufMs = remainderMs;
+
+    const wav = this.segmentsToWav(segments);
+    if (wav) {
+      const dur = wav.durationSec;
+      this.events.onFlushEnd(wav.wav, dur);
+      this.events.onUtterancePause();
+      console.log(`[audio] sentence done — shipping ${dur.toFixed(1)}s (${Math.round(silenceMs)}ms quiet)`);
+    } else {
+      console.log(`[audio] chunk dropped (too short / below noise gate)`);
+    }
+  }
+
+  // Final flush on manual stop: ship whatever is still buffered, gated.
+  private flushFinal(): void {
+    const wav = this.segmentsToWav(this.buf);
+    if (wav) {
+      this.events.onFlushEnd(wav.wav, wav.durationSec);
+      this.events.onUtterancePause();
+    } else {
+      this.events.onFlushEnd(new ArrayBuffer(0), 0);
     }
   }
 
@@ -222,8 +297,8 @@ export class VoquaRecorder {
   private sliceBufferTail(
     segments: Float32Array[],
     cutSamples: number,
-  ): { segments: Float32Array[]; ms: number; remainder: Float32Array[]; remainderMs: number } {
-    const rate = this.ctx?.sampleRate ?? 16000;
+  ): { segments: Float32Array[]; remainder: Float32Array[]; remainderMs: number } {
+    const rate = this.rate();
     const total = segments.reduce((n, s) => n + s.length, 0);
     const keepLen = Math.max(0, total - cutSamples);
 
@@ -241,7 +316,6 @@ export class VoquaRecorder {
       }
     }
     const speech = out.filter((s) => s.length > 0);
-    const speechSamples = speech.reduce((n, s) => n + s.length, 0);
 
     // remainder = everything after keepLen (the trailing pause — we keep only
     // TAIL_CARRY_MS of it, which we already left intact by slicing at keepLen;
@@ -261,7 +335,6 @@ export class VoquaRecorder {
 
     return {
       segments: speech,
-      ms: (speechSamples / rate) * 1000,
       remainder: remClean,
       remainderMs: (remSamples / rate) * 1000,
     };

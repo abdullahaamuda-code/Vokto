@@ -210,6 +210,15 @@ function sanitizeTranscript(raw: string): string {
   let text = raw;
   if (!text) return '';
 
+  // 0. Collapse a short phrase looped 2+ times back-to-back ("let me try
+  //    again let me try again" → "let me try again"). Whisper does this on
+  //    short/live chunks; requires a 3-7 word phrase repeated as the WHOLE
+  //    chunk so genuine repeated filler ("yeah yeah") is left alone.
+  const phraseLoop = text.match(/^((?:\S+\s+){2,6}\S+)(?:\s+\1){1,}$/);
+  if (phraseLoop) {
+    text = phraseLoop[1];
+  }
+
   // 1. Cut the classic "X. X. X. X.…" loop — same sentence repeated 3+ times back to back.
   //    Works on any sentence ending in . ? !
   const loopMatch = text.match(/^(.{3,120}?[.?!])(\s+\1){2,}\s*$/);
@@ -229,6 +238,11 @@ function sanitizeTranscript(raw: string): string {
     const uniq = new Set(words.map((w) => w.toLowerCase().replace(/[.?!,]/g, '')));
     if (uniq.size <= 2) return ''; // e.g. "Preserve. Preserve. Preserve. Preserve."
   }
+
+  // 3b. A lone word is only junk when it's tiny or vowel-less ("Rr", "Thhh").
+  //     Clean single words like "Yes" / "Okay" / "Right" are legit dictation
+  //     and must survive — this is what kept blotting out short replies.
+  if (words.length < 2 && (text.length <= 2 || !/[aeiou]/i.test(text))) return '';
 
   // 4. Pure non-speech noise (no vowels at all) → drop.
   if (text && !/[aeiou]/i.test(text.replace(/[^a-z]/gi, ''))) return '';

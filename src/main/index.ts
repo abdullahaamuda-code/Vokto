@@ -27,8 +27,9 @@ const applyLaunchAtLogin = (): void => {
 // The window is wider than the visual pill; the renderer re-centers the pill
 // every animation frame so window dragging keeps it centered (rounded
 // transparent windows clip content near edges).
-const overlayDims = () => ({ w: 340, h: 88 });
-const OVERLAY_CHANGED = 3; // bump to wipe stale saved positions after shape changes
+// Height now also fits the live transcript strip below the pill.
+const overlayDims = () => ({ w: 500, h: 168 });
+const OVERLAY_CHANGED = 4; // bump to wipe stale saved positions after shape changes
 
 function overlayDefaultPosition(): { x: number; y: number } {
   const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
@@ -304,27 +305,27 @@ function stopNarrator(): void {
 }
 
 // Alt+Q while recording → recorder flushes its tail (arrives as flush-end),
-// the pipeline pastes whatever was queued, then we fully close.
-let finishing = false;
+// the UI closes INSTANTLY, and the remaining queue keeps transcribing + pasting
+// in the background. You never wait on Groq to "stop".
+let finalizing = false;
 function finishSession(): void {
-  console.log('[main] finish requested — flush tail, paste, close');
-  if (!pipeline || finishing) return;
-  finishing = true;
-  sendAudio({ type: 'set-recording', on: false }); // recorder will emit flush-end with the tail
-  // Give the flush IPC a moment to arrive before draining
+  console.log('[main] finish requested — flush tail, reset UI now, drain in background');
+  if (!pipeline || finalizing) return;
+  finalizing = true;
+  sendAudio({ type: 'set-recording', on: false }); // recorder emits flush-end with the tail
+  // Close the UI immediately — no waiting for transcription.
+  setState('idle');
+  sendOverlay({ type: 'reset' });
+  hideOverlay(true);
+  const p = pipeline;
+  // Give the flush IPC a moment to arrive, then let the queue drain behind the
+  // scenes. Pastes still land even though the pill is gone.
   setTimeout(() => {
-    if (!pipeline) {
-      finishing = false;
-      return;
-    }
-    void pipeline.finish().finally(() => {
-      pipeline = null;
-      finishing = false;
-      setState('idle');
-      sendOverlay({ type: 'reset' });
-      hideOverlay(true);
+    void p.close().finally(() => {
+      finalizing = false;
+      if (pipeline === p) pipeline = null;
     });
-  }, 350);
+  }, 300);
 }
 
 function stopSessionSafety(): void {
@@ -336,15 +337,17 @@ function stopSessionSafety(): void {
 }
 
 function toggleDictation(): void {
-  if (state === 'idle' && !pipeline) {
-    if (!hasAnyKey()) {
-      showNoKeysHint();
-      return;
-    }
-    startSession();
-  } else if (state === 'recording' && pipeline) {
+  if (state === 'recording' && pipeline) {
     finishSession();
+    return;
   }
+  // Idle — or a previous session is still draining in the background. Starting
+  // again aborts that leftover pipeline so we never run two at once.
+  if (!hasAnyKey()) {
+    showNoKeysHint();
+    return;
+  }
+  startSession();
 }
 
 // ── IPC wiring ─────────────────────────────────────────────────────────────
