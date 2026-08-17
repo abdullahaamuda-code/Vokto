@@ -31,6 +31,11 @@ const LONG_PAUSE_ABORT_MS = 120_000; // 2 min dead silence → auto-close entire
 // random sound").
 const NOISE_DROP_RATIO = 2.5;
 const MIN_CHUNK_RMS = 0.004;
+// A chunk also needs a real peak sample above this. Near-silent audio can have
+// decent RMS (hiss) but no peaks — and Whisper's silence-hallucinations ("If
+// the audio is clear…") come from exactly that: near-silent audio it shouldn't
+// have seen. Requiring a peak kills room-tone/hiss chunks entirely.
+const MIN_CHUNK_PEAK = 0.02;
 
 // Per-utterance streaming: we keep the mic hot across the whole session.
 // Every time you pause to breathe/think (~1.1s), the buffered speech is cut
@@ -174,16 +179,20 @@ export class VoquaRecorder {
     const merged = new Float32Array(total);
     let off = 0;
     let sumSq = 0;
+    let peak = 0;
     for (const s of segments) {
       merged.set(s, off);
       for (let i = 0; i < s.length; i++) {
         const v = s[i];
         sumSq += v * v;
+        const abs = v < 0 ? -v : v;
+        if (abs > peak) peak = abs;
       }
       off += s.length;
     }
     const rms = Math.sqrt(sumSq / Math.max(1, total));
     if (rms < Math.max(this.floor * NOISE_DROP_RATIO, MIN_CHUNK_RMS)) return null;
+    if (peak < MIN_CHUNK_PEAK) return null;
     const wav = encodeWav(merged, rate);
     return { wav: wav.buffer as ArrayBuffer, durationSec: total / rate };
   }
