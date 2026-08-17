@@ -280,9 +280,9 @@ export function App() {
                   ? 'linear-gradient(165deg, rgba(28,22,12,0.94), rgba(13,11,6,0.92))'
                   : 'rgba(12,12,17,0.92)',
                 backdropFilter: 'blur(22px) saturate(170%)',
-                border: glow ? '1px solid rgba(232,176,74,0.28)' : '1px solid rgba(255,255,255,0.08)',
+                border: glow ? '1px solid rgba(224,164,40,0.28)' : '1px solid rgba(255,255,255,0.08)',
                 boxShadow: glow
-                  ? '0 10px 32px -10px rgba(0,0,0,0.9), 0 0 0 1px rgba(232,176,74,0.10), 0 0 20px -4px rgba(232,176,74,0.35)'
+                  ? '0 10px 32px -10px rgba(0,0,0,0.9), 0 0 0 1px rgba(224,164,40,0.10), 0 0 20px -4px rgba(224,164,40,0.35)'
                   : '0 10px 28px -10px rgba(0,0,0,0.85)',
                 opacity: listening ? (glow ? 1 : 0.62) : 1,
                 transition:
@@ -295,8 +295,8 @@ export function App() {
                 style={{
                   width: 5,
                   height: 5,
-                  background: micError ? '#ff5c74' : glow ? '#e8b04a' : '#6b6b7e',
-                  boxShadow: glow ? '0 0 6px rgba(232,176,74,0.7)' : 'none',
+                  background: micError ? '#ff5c74' : glow ? '#e0a428' : '#6b6b7e',
+                  boxShadow: glow ? '0 0 6px rgba(224,164,40,0.7)' : 'none',
                   transition: 'background 220ms ease, box-shadow 220ms ease',
                 }}
                 animate={queuedBlink ? { scale: [1, 1.9, 1], opacity: [1, 0.5, 1] } : glow ? { opacity: [0.85, 1, 0.85] } : {}}
@@ -350,7 +350,7 @@ function SlimWave({ level, active, error }: { level: number; active: boolean; er
     hist.current.shift();
   });
 
-  const color = error ? '#ff5c74' : '#e8b04a';
+  const color = error ? '#ff5c74' : '#e0a428';
   if (!active) {
     return <div className="h-[2px] rounded-full bg-white/10" style={{ width: 38 }} />;
   }

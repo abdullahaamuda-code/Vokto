@@ -1,7 +1,7 @@
 {
   "name": "vokto",
   "productName": "Vokto",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "description": "Vokto — always-on voice typing. Alt+Q, talk, text streams wherever your cursor is.",
   "author": "abdul",
   "license": "MIT",
